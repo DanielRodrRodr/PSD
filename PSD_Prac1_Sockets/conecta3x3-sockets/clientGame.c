@@ -6,11 +6,15 @@
  * @param message Message to be sent
  */
 void sendMessageToServer (int socketServer, char* message){
+	unsigned int length = strlen(message);
+    int msgLength = send(socketServer, &length, sizeof(length), 0);
 
-	msgLength = send(socketServer, message, strlen(message), 0);
+    if (msgLength < 0)
+        showError("ERROR while writing to the socket");
 
-	if (msgLength < 0)
-		showError("ERROR while writing to the socket");
+    msgLength = send(socketServer, message, length, 0);
+    if (msgLength < 0)
+        showError("ERROR while writing to the socket");
 }
 
 /**
@@ -20,12 +24,19 @@ void sendMessageToServer (int socketServer, char* message){
  */
 void receiveMessageFromServer (int socketServer, char* message){
 
-	memset(message, 0, MAX_MSG_LENGTH);
-	msgLength = recv(socketServer, message, MAX_MSG_LENGTH-1, 0);
+	unsigned int length = 0;
+    int msgLength = recv(socketServer, &length, sizeof(length), 0);
 
+    if (msgLength < 0)
+        showError("ERROR while reading from the socket");
 
-	if (msgLength < 0)
-		showError("ERROR while reading from the socket");
+    memset(message, 0, MAX_MSG_LENGTH);
+    if (length > 0) {
+        msgLength = recv(socketServer, message, length, 0);
+        if (msgLength < 0)
+            showError("ERROR while reading from the socket");
+        message[length] = '\0';
+    }
 }
 
 
@@ -36,8 +47,7 @@ void receiveMessageFromServer (int socketServer, char* message){
  */
 void receiveBoard (int socketServer, tBoard board){
 
-	memset(message, 0, MAX_MSG_LENGTH);
-	msgLength = recv(socketServer, message, MAX_MSG_LENGTH-1, 0);
+	int msgLength = recv(socketServer, &board, sizeof(tBoard), 0);
 	if (msgLength < 0)
 		showError("ERROR while reading from the socket");
 }
@@ -50,12 +60,13 @@ void receiveBoard (int socketServer, tBoard board){
  */
 unsigned int receiveCode (int socketServer){
 
-	memset(message, 0, MAX_MSG_LENGTH);
-	msgLength = recv(socketServer, message, MAX_MSG_LENGTH-1, 0);
-	if (msgLength < 0)
-		showError("ERROR while reading from the socket");
+	unsigned int code = 0;
+    int msgLength = recv(socketServer, &code, sizeof(code), 0);
 
-	return (unsigned int)message;
+    if (msgLength < 0)
+        showError("ERROR while reading from the socket");
+
+    return code;
 }
 
 /**
@@ -116,8 +127,9 @@ unsigned int readMove (){
  * @param move A number between [0-6] that represents the column where the chip is going to be inserted
  */
 void sendMoveToServer (int socketServer, unsigned int move){
-	sendMessageToServer(socketServer, (char)move);
-	
+	int msgLength = send(socketServer, &move, sizeof(move), 0);
+    if (msgLength < 0)
+        showError("ERROR while writing to socket");
 }
 
 
@@ -128,10 +140,7 @@ int main(int argc, char *argv[]){
 	struct sockaddr_in server_address;	/** Server address structure */
 	char* serverIP;						/** Server IP */
     tString playerName;                    /** Name of the player */
-
-	
-
-
+	char rival1[MAX_MSG_LENGTH], rival2[MAX_MSG_LENGTH];
 
 	// Check arguments!
 	if (argc != 3){
@@ -150,23 +159,19 @@ int main(int argc, char *argv[]){
 	socketfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
 	// Check if the socket has been successfully created
-		if (socketfd < 0)
+	if (socketfd < 0)
 		showError("ERROR while opening socket");
 	
 
 	// Fill server address structure
+	memset(&serverAddress, 0, sizeof(serverAddress));
 	serverAddress.sin_family = AF_INET;
 	serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
 	serverAddress.sin_port = htons(port);
 
 	// Connect with server
-	if (bind(socketfd, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0)
-			showError("ERROR while binding");
-		listen(socketfd, 10);
-		clientLength = sizeof(clientAddress);
-		newsockfd = accept(socketfd, (struct sockaddr *) &clientAddress, &clientLength);
-		if (newsockfd < 0)
-			showError("ERROR while accepting");
+	if (connect(socketfd, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0)
+        showError("ERROR while connecting");
 
 	// Init player's name
 	do{
@@ -179,22 +184,34 @@ int main(int argc, char *argv[]){
 
 	}while (strlen(playerName) <= 2);
 
-	if (messageLength < 0)
-			showError("ERROR while reading from socket");
+	// Main loop
+	sendMessageToServer(socketfd, playerName);
+	receiveMessageFromServer(socketfd, rival1);
+    receiveMessageFromServer(socketfd, rival2);
+	
+	unsigned int code;
+    char message[MAX_MSG_LENGTH];
+    tBoard board;
+	int gameOver = 0;
 
-		// Show message
-		printf("Message: %d\n", messageLength);
+    while (!gameOver) {
+        code = receiveCode(socketfd);
+        receiveMessageFromServer(socketfd, message);
+        receiveBoard(socketfd, board);
 
-		// Get the message length
-		memset (messageLength, 0, MAX_MSG_LENGTH);
-	messageLength = send(newsockfd, messageLength, strlen(messageLength), 0);
+        // Imprimir tablero y mensaje de estado
+        printBoard(board, message);
 
-	if (messageLength < 0)
-		showError("ERROR while writing to socket");
+        if (code == TURN_MOVE) {
+            unsigned int move = readMove();
+            sendMoveToServer(socketfd, move);
+        } else if (code == GAMEOVER_WIN || code == GAMEOVER_LOSE || code == GAMEOVER_DRAW) {
+            gameOver = 1;
+        }
+    }
 
 
 	// Close socket
-	close(newsockfd);
 	close (socketfd);
 
     return 0;

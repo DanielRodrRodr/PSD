@@ -10,11 +10,15 @@
  */
 void sendMessageToPlayer (int socketClient, char* message){
 
-	int messageLength = send(socketClient, message, strlen(message), 0);
+	unsigned int length = strlen(message);
+    int msgLength = send(socketClient, &length, sizeof(length), 0);
 
-	// Check bytes sent
-	if (messageLength < 0)
-		showError("ERROR while writing to socket");
+    if (msgLength < 0)
+        showError("ERROR while writing to socket");
+
+    msgLength = send(socketClient, message, length, 0);
+    if (msgLength < 0)
+        showError("ERROR while writing to socket");
 	
 }
 
@@ -25,10 +29,19 @@ void sendMessageToPlayer (int socketClient, char* message){
  */
 void receiveMessageFromPlayer (int socketClient, char* message){
 
-	memset(message, 0, MAX_MSG_LENGTH);
-	int messageLength = recv(socketClient, message, MAX_MSG_LENGTH-1, 0);
-	if (messageLength < 0)
+	unsigned int length = 0;
+    int msgLength = recv(socketClient, &length, sizeof(length), 0);
+
+    if (msgLength < 0)
         showError("ERROR while reading from socket");
+
+    memset(message, 0, MAX_MSG_LENGTH);
+    if (length > 0) {
+        msgLength = recv(socketClient, message, length, 0);
+        if (msgLength < 0)
+            showError("ERROR while reading from socket");
+        message[length] = '\0';
+    }
 }
 
 /**
@@ -112,63 +125,97 @@ void *threadProcessing(void *threadArgs){
     int s1 = args->socketPlayer1;
     int s2 = args->socketPlayer2;
     int s3 = args->socketPlayer3;
+    free(args);
 
-    tPlayer player = player1;
+    char name1[MAX_MSG_LENGTH], name2[MAX_MSG_LENGTH], name3[MAX_MSG_LENGTH];
+
+    // Cambio de nombres
+    receiveMessageFromPlayer(s1, name1);
+    receiveMessageFromPlayer(s2, name2);
+    receiveMessageFromPlayer(s3, name3);
+
+    // Envia a cada jugador los nombres de los rivales
+    sendMessageToPlayer(s1, name2);
+    sendMessageToPlayer(s1, name3);
+
+    sendMessageToPlayer(s2, name1);
+    sendMessageToPlayer(s2, name3);
+
+    sendMessageToPlayer(s3, name1);
+    sendMessageToPlayer(s3, name2);
+
+    // Juego
     tBoard board;
     initBoard(board);
-    unsigned int move;
 
-    while(!checkWinner(board, player) && !isBoardFull(board)){
-        if(player == player1){
-            sendCodeToClient(s1, TURN_MOVE);
-            sendMessageToPlayer(s1, "Its your turn. You play with:o");
-            sendBoardToClient(s1, board);
+    tPlayer currentPlayer = player1;
+    int activeSocket = s1;
+    tMove moveResult;
 
-            sendCodeToClient(s2, TURN_WAIT);
-            sendMessageToPlayer(s2, "Your rival is thinking... please, wait! You play with:x");
-            sendBoardToClient(s2, board);
+    // Info inicial
+    sendCodeToClient(s1, TURN_MOVE);
+    sendMessageToPlayer(s1, "Its your turn. You play with:o");
+    sendBoardToClient(s1, board);
 
-            sendCodeToClient(s3, TURN_WAIT);
-            sendMessageToPlayer(s3, "Your rival is thinking... please, wait! You play with:-");
-            sendBoardToClient(s3, board);
+    sendCodeToClient(s2, TURN_WAIT);
+    sendMessageToPlayer(s2, "Your rival is thinking... please, wait! You play with:x");
+    sendBoardToClient(s2, board);
 
-            move = receiveMoveFromPlayer(s1);
-        }
-        else if(player == player2){
-            sendCodeToClient(s1, TURN_WAIT);
-            sendMessageToPlayer(s1, "Your rival is thinking... please, wait! You play with:o");
-            sendBoardToClient(s1, board);
+    sendCodeToClient(s3, TURN_WAIT);
+    sendMessageToPlayer(s3, "Your rival is thinking... please, wait! You play with:-");
+    sendBoardToClient(s3, board);
 
-            sendCodeToClient(s2, TURN_MOVE);
-            sendMessageToPlayer(s2, "Its your turn. You play with:x");
-            sendBoardToClient(s2, board);
+    int gameOver = 0;
 
-            sendCodeToClient(s3, TURN_WAIT);
-            sendMessageToPlayer(s3, "Your rival is thinking... please, wait! You play with:-");
-            sendBoardToClient(s3, board);
+    while (!gameOver) {
+        activeSocket = getSocketPlayer(currentPlayer, s1, s2, s3);
+        unsigned int column = receiveMoveFromPlayer(activeSocket);
 
-            move = receiveMoveFromPlayer(s2);
-        }
-        else if(player == player3){
-            sendCodeToClient(s1, TURN_WAIT);
-            sendMessageToPlayer(s1, "Your rival is thinking... please, wait! You play with:o");
-            sendBoardToClient(s1, board);
+        moveResult = insertChip(board, currentPlayer, column);
 
-            sendCodeToClient(s2, TURN_WAIT);
-            sendMessageToPlayer(s2, "Your rival is thinking... please, wait! You play with:x");
-            sendBoardToClient(s2, board);
-
-            sendCodeToClient(s3, TURN_MOVE);
-            sendMessageToPlayer(s3, "Its your turn. You play with:-");
-            sendBoardToClient(s3, board);
-
-            move = receiveMoveFromPlayer(s3);
+        if (moveResult != OK) {
+            sendCodeToClient(activeSocket, TURN_MOVE);
+            sendMessageToPlayer(activeSocket, "Invalid move! Column full or out of range. Try again:");
+            sendBoardToClient(activeSocket, board);
+            continue;
         }
 
-        insertChip(board, move, player);
+        if (checkWinner(board, currentPlayer)) {
+            gameOver = 1;
+            if (currentPlayer == player1) {
+                sendCodeToClient(s1, GAMEOVER_WIN);  sendMessageToPlayer(s1, "You WIN!");                sendBoardToClient(s1, board);
+                sendCodeToClient(s2, GAMEOVER_LOSE); sendMessageToPlayer(s2, "GAMEOVER: Player 1 won."); sendBoardToClient(s2, board);
+                sendCodeToClient(s3, GAMEOVER_LOSE); sendMessageToPlayer(s3, "GAMEOVER: Player 1 won."); sendBoardToClient(s3, board);
+            } else if (currentPlayer == player2) {
+                sendCodeToClient(s1, GAMEOVER_LOSE); sendMessageToPlayer(s1, "GAMEOVER: Player 2 won."); sendBoardToClient(s1, board);
+                sendCodeToClient(s2, GAMEOVER_WIN);  sendMessageToPlayer(s2, "You WIN!");                sendBoardToClient(s2, board);
+                sendCodeToClient(s3, GAMEOVER_LOSE); sendMessageToPlayer(s3, "GAMEOVER: Player 2 won."); sendBoardToClient(s3, board);
+            } else {
+                sendCodeToClient(s1, GAMEOVER_LOSE); sendMessageToPlayer(s1, "GAMEOVER: Player 3 won."); sendBoardToClient(s1, board);
+                sendCodeToClient(s2, GAMEOVER_LOSE); sendMessageToPlayer(s2, "GAMEOVER: Player 3 won."); sendBoardToClient(s2, board);
+                sendCodeToClient(s3, GAMEOVER_WIN);  sendMessageToPlayer(s3, "You WIN!");                sendBoardToClient(s3, board);
+            }
+        } else if (isBoardFull(board)) {
+            gameOver = 1;
+            sendCodeToClient(s1, GAMEOVER_DRAW); sendMessageToPlayer(s1, "GAMEOVER: It's a draw!"); sendBoardToClient(s1, board);
+            sendCodeToClient(s2, GAMEOVER_DRAW); sendMessageToPlayer(s2, "GAMEOVER: It's a draw!"); sendBoardToClient(s2, board);
+            sendCodeToClient(s3, GAMEOVER_DRAW); sendMessageToPlayer(s3, "GAMEOVER: It's a draw!"); sendBoardToClient(s3, board);
+        } else {
+            currentPlayer = getNextPlayer(currentPlayer);
 
-        if(!checkWinner(board, player) && !isBoardFull(board)){
-            player = getNextPlayer(player);
+            if (currentPlayer == player1) {
+                sendCodeToClient(s1, TURN_MOVE); sendMessageToPlayer(s1, "Its your turn. You play with:o"); sendBoardToClient(s1, board);
+                sendCodeToClient(s2, TURN_WAIT); sendMessageToPlayer(s2, "Your rival is thinking... please, wait! You play with:x"); sendBoardToClient(s2, board);
+                sendCodeToClient(s3, TURN_WAIT); sendMessageToPlayer(s3, "Your rival is thinking... please, wait! You play with:-"); sendBoardToClient(s3, board);
+            } else if (currentPlayer == player2) {
+                sendCodeToClient(s1, TURN_WAIT); sendMessageToPlayer(s1, "Your rival is thinking... please, wait! You play with:o"); sendBoardToClient(s1, board);
+                sendCodeToClient(s2, TURN_MOVE); sendMessageToPlayer(s2, "Its your turn. You play with:x"); sendBoardToClient(s2, board);
+                sendCodeToClient(s3, TURN_WAIT); sendMessageToPlayer(s3, "Your rival is thinking... please, wait! You play with:-"); sendBoardToClient(s3, board);
+            } else {
+                sendCodeToClient(s1, TURN_WAIT); sendMessageToPlayer(s1, "Your rival is thinking... please, wait! You play with:o"); sendBoardToClient(s1, board);
+                sendCodeToClient(s2, TURN_WAIT); sendMessageToPlayer(s2, "Your rival is thinking... please, wait! You play with:x"); sendBoardToClient(s2, board);
+                sendCodeToClient(s3, TURN_MOVE); sendMessageToPlayer(s3, "Its your turn. You play with:-"); sendBoardToClient(s3, board);
+            }
         }
     }
 
@@ -177,7 +224,6 @@ void *threadProcessing(void *threadArgs){
     close(s3);
 
     pthread_exit(NULL);
-	
 }
 
 int main(int argc, char *argv[]){
@@ -185,12 +231,8 @@ int main(int argc, char *argv[]){
 	int socketfd;						/** Socket descriptor */
 	struct sockaddr_in serverAddress;	/** Server address structure */
 	unsigned int port;					/** Listening port */
-	struct sockaddr_in player1Address;	/** Client address structure for player 1 */
-	struct sockaddr_in player2Address;	/** Client address structure for player 2 */
-	struct sockaddr_in player3Address;	/** Client address structure for player 3 */
-	tThreadArgs thArg;					/** Socket descriptor for players */
+	struct sockaddr_in playerAddress;	/** Client address structure for player 1 */
 	unsigned int clientLength;			/** Length of client structure */
-	tThreadArgs *threadArgs; 			/** Thread parameters */
 	pthread_t threadID;					/** Thread ID */
 
 
@@ -226,113 +268,27 @@ int main(int argc, char *argv[]){
 	// Listen
 	listen(socketfd, 10);
 
-	// Get length of client structure
-	clientLength = sizeof(player1Address);
+	// Partidas
+	while (1) {
+        tThreadArgs *args = (tThreadArgs *) malloc(sizeof(tThreadArgs));
 
-	// Accept!
-	thArg.socketPlayer1 = accept(socketfd, (struct sockaddr *) &player1Address, &clientLength);
-	
-	// Check accept result
-	if (thArg.socketPlayer1  < 0)
-		showError("ERROR while accepting");
+        clientLength = sizeof(playerAddress);
+        args->socketPlayer1 = accept(socketfd, (struct sockaddr *) &playerAddress, &clientLength);
+        if (args->socketPlayer1 < 0) showError("ERROR while accepting player 1");
 
-	// Accept!
-	clientLength = sizeof(player2Address);
-	thArg.socketPlayer2 = accept(socketfd, (struct sockaddr *) &player2Address, &clientLength);
+        clientLength = sizeof(playerAddress);
+        args->socketPlayer2 = accept(socketfd, (struct sockaddr *) &playerAddress, &clientLength);
+        if (args->socketPlayer2 < 0) showError("ERROR while accepting player 2");
 
-	// Check accept result
-	if (thArg.socketPlayer2 < 0)
-		showError("ERROR while accepting");
+        clientLength = sizeof(playerAddress);
+        args->socketPlayer3 = accept(socketfd, (struct sockaddr *) &playerAddress, &clientLength);
+        if (args->socketPlayer3 < 0) showError("ERROR while accepting player 3");
 
-	// Accept!
-	clientLength = sizeof(player3Address);
-	thArg.socketPlayer3 = accept(socketfd, (struct sockaddr *) &player3Address, &clientLength);
-
-	// Check accept result
-	if (thArg.socketPlayer3 < 0)
-		showError("ERROR while accepting");	  
-
-	// Init and read message
-
-	if (pthread_create(&threadID, NULL, threadProcessing, (void *)&thArg) != 0) {
-        showError("ERROR creating thread");
+        if (pthread_create(&threadID, NULL, threadProcessing, (void *)args) != 0) {
+            showError("ERROR creating thread");
+        }
+        pthread_detach(threadID);
     }
-
-	pthread_join(threadID, NULL);
-	tPlayer player=player1;
-	tBoard board;
-	initBoard(board);
-	char* msg;
-	while(!checkWinner(board,player)&&!isBoardFull(board)){
-		if(player==player1){
-			sendCodeToClient(thArg.socketPlayer1,TURN_MOVE);
-			sendMessageToPlayer(thArg.socketPlayer1, "Its your turn. You play with:o");
-			sendBoardToClient(thArg.socketPlayer1,board);
-
-			sendCodeToClient(thArg.socketPlayer2,TURN_WAIT);
-			sendMessageToPlayer(thArg.socketPlayer2, "Your rival is thinking... please, wait! You play with:x");
-			sendBoardToClient(thArg.socketPlayer2,board);
-
-			sendCodeToClient(thArg.socketPlayer3,TURN_WAIT);
-			sendMessageToPlayer(thArg.socketPlayer3, "Your rival is thinking... please, wait! You play with: -");
-			sendBoardToClient(thArg.socketPlayer3,board);
-
-			receiveMessageFromPlayer(thArg.socketPlayer1, msg);
-		}
-		else if(player==player2){
-			
-			sendCodeToClient(thArg.socketPlayer1,TURN_WAIT);
-			sendMessageToPlayer(thArg.socketPlayer1, "Your rival is thinking... please, wait! You play with:o");
-			sendBoardToClient(thArg.socketPlayer1,board);
-
-			sendCodeToClient(thArg.socketPlayer2,TURN_MOVE);
-			sendMessageToPlayer(thArg.socketPlayer2, "Its your turn. You play with:x");
-			sendBoardToClient(thArg.socketPlayer2,board);
-
-			sendCodeToClient(thArg.socketPlayer3,TURN_WAIT);
-			sendMessageToPlayer(thArg.socketPlayer3, "Your rival is thinking... please, wait! You play with:-");
-			sendBoardToClient(thArg.socketPlayer3,board);
-
-			receiveMessageFromPlayer(thArg.socketPlayer1, msg);
-		}
-		else if(player==player3){
-			sendCodeToClient(thArg.socketPlayer1,TURN_WAIT);
-			sendMessageToPlayer(thArg.socketPlayer1, "Your rival is thinking... please, wait! You play with:o");
-			sendBoardToClient(thArg.socketPlayer1,board);
-
-			sendCodeToClient(thArg.socketPlayer2,TURN_WAIT);
-			sendMessageToPlayer(thArg.socketPlayer2, "Your rival is thinking... please, wait! You play with:x");
-			sendBoardToClient(thArg.socketPlayer2,board);
-
-			sendCodeToClient(thArg.socketPlayer3,TURN_MOVE);
-			sendMessageToPlayer(thArg.socketPlayer3, "Its your turn. You play with:-");
-			sendBoardToClient(thArg.socketPlayer3,board);
-
-			receiveMessageFromPlayer(thArg.socketPlayer1, msg);
-		}
-		insertChip();
-		player=getNextPlayer(player);
-	}
-
-
-
-	memset(message, 0, MAX_MSG_LENGTH);
-	messageLength = recv(newsockfd, message, MAX_MSG_LENGTH-1, 0);
-
-	// Check read bytes
-	if (messageLength < 0)
-		showError("ERROR while reading from socket");
-
-	// Show message
-	printf("Message: %d\n", messageLength);
-
-	// Get the message length
-	memset (messageLength, 0, MAX_MSG_LENGTH);
-	messageLength = send(newsockfd, messageLength, strlen(messageLength), 0);
-
-	// Check bytes sent
-	if (messageLength < 0)
-		showError("ERROR while writing to socket");
 
 	// Close sockets
 	close(socketfd);
