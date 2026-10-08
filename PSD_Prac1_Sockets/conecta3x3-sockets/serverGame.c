@@ -65,7 +65,7 @@ void sendCodeToClient (int socketClient, unsigned int code){
  * @param board Board of the game
  */
 void sendBoardToClient (int socketClient, tBoard board){
-	int messageLength = send(socketClient, &board, sizeof(tBoard), 0);
+	int messageLength = send(socketClient, board, sizeof(tBoard), 0);
 
 	// Check bytes sent
 	if (messageLength < 0)
@@ -173,7 +173,7 @@ void *threadProcessing(void *threadArgs){
 
         moveResult = insertChip(board, currentPlayer, column);
 
-        if (moveResult != OK) {
+        if (moveResult != OK_move) {
             sendCodeToClient(activeSocket, TURN_MOVE);
             sendMessageToPlayer(activeSocket, "Invalid move! Column full or out of range. Try again:");
             sendBoardToClient(activeSocket, board);
@@ -275,14 +275,20 @@ int main(int argc, char *argv[]){
         clientLength = sizeof(playerAddress);
         args->socketPlayer1 = accept(socketfd, (struct sockaddr *) &playerAddress, &clientLength);
         if (args->socketPlayer1 < 0) showError("ERROR while accepting player 1");
+        printf("Jugador 1 conectado\n");
+        fflush(stdout);
 
         clientLength = sizeof(playerAddress);
         args->socketPlayer2 = accept(socketfd, (struct sockaddr *) &playerAddress, &clientLength);
         if (args->socketPlayer2 < 0) showError("ERROR while accepting player 2");
+        printf("Jugador 2 conectado\n");
+        fflush(stdout);
 
         clientLength = sizeof(playerAddress);
         args->socketPlayer3 = accept(socketfd, (struct sockaddr *) &playerAddress, &clientLength);
         if (args->socketPlayer3 < 0) showError("ERROR while accepting player 3");
+        printf("Jugador 3 conectado\n");
+        fflush(stdout);
 
         if (pthread_create(&threadID, NULL, threadProcessing, (void *)args) != 0) {
             showError("ERROR creating thread");

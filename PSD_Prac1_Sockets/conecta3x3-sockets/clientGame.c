@@ -30,7 +30,7 @@ void receiveMessageFromServer (int socketServer, char* message){
     if (msgLength < 0)
         showError("ERROR while reading from the socket");
 
-    memset(message, 0, MAX_MSG_LENGTH);
+    memset(message, 0, STRING_LENGTH);
     if (length > 0) {
         msgLength = recv(socketServer, message, length, 0);
         if (msgLength < 0)
@@ -47,14 +47,14 @@ void receiveMessageFromServer (int socketServer, char* message){
  */
 void receiveBoard (int socketServer, tBoard board){
 
-	int msgLength = recv(socketServer, &board, sizeof(tBoard), 0);
+	int msgLength = recv(socketServer, board, sizeof(tBoard), 0);
 	if (msgLength < 0)
 		showError("ERROR while reading from the socket");
 }
 
 
 /**
- * Receives a code from the server.
+ * Receives a code from the server.   
  * @param socketServer Socket descriptor
  * @return Code
  */
@@ -140,7 +140,7 @@ int main(int argc, char *argv[]){
 	struct sockaddr_in server_address;	/** Server address structure */
 	char* serverIP;						/** Server IP */
     tString playerName;                    /** Name of the player */
-	char rival1[MAX_MSG_LENGTH], rival2[MAX_MSG_LENGTH];
+	char rival1[STRING_LENGTH], rival2[STRING_LENGTH];
 
 	// Check arguments!
 	if (argc != 3){
@@ -164,13 +164,13 @@ int main(int argc, char *argv[]){
 	
 
 	// Fill server address structure
-	memset(&serverAddress, 0, sizeof(serverAddress));
-	serverAddress.sin_family = AF_INET;
-	serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-	serverAddress.sin_port = htons(port);
+	memset(&server_address, 0, sizeof(server_address));
+	server_address.sin_family = AF_INET;
+	server_address.sin_addr.s_addr = htonl(INADDR_ANY);
+	server_address.sin_port = htons(port);
 
 	// Connect with server
-	if (connect(socketfd, (struct sockaddr *) &serverAddress, sizeof(serverAddress)) < 0)
+	if (connect(socketfd, (struct sockaddr *) &server_address, sizeof(server_address)) < 0)
         showError("ERROR while connecting");
 
 	// Init player's name
@@ -188,9 +188,10 @@ int main(int argc, char *argv[]){
 	sendMessageToServer(socketfd, playerName);
 	receiveMessageFromServer(socketfd, rival1);
     receiveMessageFromServer(socketfd, rival2);
+	printf("You are playing against %s and %s" ,rival1,rival2);
 	
 	unsigned int code;
-    char message[MAX_MSG_LENGTH];
+    char message[STRING_LENGTH];
     tBoard board;
 	int gameOver = 0;
 
